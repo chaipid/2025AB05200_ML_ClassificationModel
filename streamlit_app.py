@@ -198,6 +198,9 @@ if not os.path.exists(model_path):
     st.stop()
 
 model = joblib.load(model_path)
+if hasattr(model, "use_label_encoder"):
+    model.use_label_encoder = False
+
 st.success(f"✅ Loaded: {model_choice}")
 
 # ============================================================================  
@@ -286,3 +289,4 @@ st.markdown(
     "<center>Developed as part of BITS Pilani – ML Assignment 2</center>",
     unsafe_allow_html=True
 )
+
