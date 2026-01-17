@@ -1,41 +1,35 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 import joblib
 import json
 import os
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
 
 # ------------------------------------------------------------
-# Streamlit Page Settings
+# Streamlit Page Setup
 # ------------------------------------------------------------
 st.set_page_config(page_title="ML Model Comparison", layout="wide")
+
 
 # ------------------------------------------------------------
 # Load Preprocessor
 # ------------------------------------------------------------
 @st.cache_resource
 def load_preprocessor():
-    try:
-        return joblib.load("model/preprocessor.pkl")
-    except:
-        st.error("❌ preprocessor.pkl not found.")
-        return None
+    return joblib.load("model/preprocessor.pkl")
 
 preprocessor = load_preprocessor()
 
+
 # ------------------------------------------------------------
-# Load Saved ML Models
+# Load ML Models
 # ------------------------------------------------------------
-def load_model(name):
-    path = f"model/{name.lower().replace(' ', '_')}.pkl"
-    if os.path.exists(path):
-        return joblib.load(path)
-    else:
-        st.error(f"Model file not found: {path}")
-        return None
+def load_model(model_name):
+    file_path = f"model/{model_name.lower().replace(' ', '_')}.pkl"
+    return joblib.load(file_path)
+
 
 # ------------------------------------------------------------
 # Load Metrics
@@ -45,26 +39,9 @@ with open("model/metrics.json", "r") as f:
 
 model_list = list(metrics.keys())
 
-# ------------------------------------------------------------
-# Dataset Choices
-# ------------------------------------------------------------
-st.title("📊 Machine Learning Classification – Model Comparison Dashboard")
-
-dataset_choice = st.selectbox(
-    "Select Dataset Source:",
-    ["Telco Churn Dataset (Default)", "Upload Custom Dataset"]
-)
-
-required_cols = [
-    "gender","SeniorCitizen","Partner","Dependents","tenure","PhoneService",
-    "MultipleLines","InternetService","OnlineSecurity","OnlineBackup",
-    "DeviceProtection","TechSupport","StreamingTV","StreamingMovies",
-    "Contract","PaperlessBilling","PaymentMethod",
-    "MonthlyCharges","TotalCharges"
-]
 
 # ------------------------------------------------------------
-# Data Cleaning (Matches your training notebook)
+# Clean Uploaded Data (same logic as training)
 # ------------------------------------------------------------
 def clean_data(df):
     df = df.copy()
@@ -77,75 +54,91 @@ def clean_data(df):
     ]
     numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
 
+    # Clean categorical values
     for col in categorical_cols:
         df[col] = df[col].astype(str).str.strip().str.lower()
 
     yes_no_cols = [
-        "Partner","Dependents","PhoneService","MultipleLines","OnlineSecurity",
-        "OnlineBackup","DeviceProtection","TechSupport","StreamingTV",
-        "StreamingMovies","PaperlessBilling"
+        "Partner","Dependents","PhoneService","MultipleLines",
+        "OnlineSecurity","OnlineBackup","DeviceProtection",
+        "TechSupport","StreamingTV","StreamingMovies","PaperlessBilling"
     ]
+
     for col in yes_no_cols:
         df[col] = df[col].replace({
-            "yes": "yes", "no": "no",
             "y": "yes", "n": "no",
             "true": "yes", "false": "no"
         })
 
     df["InternetService"] = df["InternetService"].replace({
-        "fiber optic": "fiber optic",
         "fiber": "fiber optic",
-        "dsl": "dsl",
         "none": "no"
     })
 
+    # Convert numerics
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
+
 # ------------------------------------------------------------
-# Load Dataset
+# SECTION 1: Dataset Section
 # ------------------------------------------------------------
-if dataset_choice == "Telco Churn Dataset (Default)":
-    df = pd.read_csv("model/test_default.csv")
-    st.info("Loaded default Telco test dataset.")
-    df = clean_data(df)
+st.header("📁 Dataset")
 
-else:
-    uploaded = st.file_uploader("Upload custom CSV file", type=["csv"])
-    if uploaded:
-        df = pd.read_csv(uploaded)
+required_cols = [
+    "gender","SeniorCitizen","Partner","Dependents","tenure","PhoneService",
+    "MultipleLines","InternetService","OnlineSecurity","OnlineBackup",
+    "DeviceProtection","TechSupport","StreamingTV","StreamingMovies",
+    "Contract","PaperlessBilling","PaymentMethod",
+    "MonthlyCharges","TotalCharges"
+]
 
-        missing = [c for c in required_cols if c not in df.columns]
-        if missing:
-            st.error(f"❌ Missing required columns: {missing}")
-            st.stop()
+# Allow user to download sample CSV
+sample_df = pd.DataFrame({col: ["sample_value"] for col in required_cols})
 
-        df = clean_data(df)
-        st.success("Custom dataset loaded and cleaned.")
-    else:
-        st.warning("Upload a CSV to proceed.")
+st.download_button(
+    "📥 Download Sample Dataset Template",
+    sample_df.to_csv(index=False).encode("utf-8"),
+    "sample_telco_input.csv",
+    "text/csv",
+)
+
+st.write("Upload a dataset matching the above structure:")
+
+uploaded = st.file_uploader("Upload CSV", type=["csv"])
+
+if uploaded:
+    df = pd.read_csv(uploaded)
+
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        st.error(f"❌ The following columns are missing: {missing}")
         st.stop()
 
-st.subheader("📌 Dataset Preview")
-st.dataframe(df.head(), use_container_width=True)
+    df = clean_data(df)
+    st.success("Dataset uploaded successfully!")
+
+else:
+    st.info("No file uploaded. Using default test dataset.")
+    df = pd.read_csv("model/test_default.csv")
+    df = clean_data(df)
+
+# Show dataset preview
+st.subheader("📊 Dataset Preview")
+st.dataframe(df.head(), width="stretch")
+
 
 # ------------------------------------------------------------
-# Model Selection
+# SECTION 2: Model Selection
 # ------------------------------------------------------------
 st.markdown("---")
-st.subheader("🤖 Select a Model")
+st.header("🤖 Model Evaluation")
 
 selected_model = st.selectbox("Choose model:", model_list)
 model = load_model(selected_model)
 
-if preprocessor is None or model is None:
-    st.stop()
-
-# ------------------------------------------------------------
-# Preprocess & Predict
-# ------------------------------------------------------------
 X = preprocessor.transform(df)
 pred = model.predict(X)
 prob = model.predict_proba(X)[:, 1]
@@ -154,49 +147,65 @@ results = df.copy()
 results["Prediction"] = pred
 results["Probability"] = prob.round(4)
 
+
 # ------------------------------------------------------------
-# Show Metrics
+# SECTION 3: Metrics + Confusion Matrix Side-by-Side
 # ------------------------------------------------------------
+st.markdown("## 📈 Evaluation Metrics")
+
 m = metrics[selected_model]
 
-st.markdown("### 📈 Performance Metrics")
-col1, col2, col3 = st.columns(3)
-col4, col5, col6 = st.columns(3)
+col_metrics, col_cm = st.columns([1, 2])
 
-col1.metric("Accuracy", round(m["accuracy"],4))
-col2.metric("AUC", round(m["auc"],4))
-col3.metric("Precision", round(m["precision"],4))
-col4.metric("Recall", round(m["recall"],4))
-col5.metric("F1 Score", round(m["f1"],4))
-col6.metric("MCC", round(m["mcc"],4))
+with col_metrics:
+    st.markdown("### 📊 Metrics Table")
+
+    metric_table = pd.DataFrame({
+        "Metric": ["Accuracy", "AUC", "Precision", "Recall", "F1 Score", "MCC"],
+        "Value": [
+            m["accuracy"],
+            m["auc"],
+            m["precision"],
+            m["recall"],
+            m["f1"],
+            m["mcc"]
+        ]
+    })
+    st.dataframe(metric_table.style.format({"Value": "{:.4f}"}), width="stretch")
+
+
+with col_cm:
+    st.markdown(f"### 📉 Confusion Matrix – {selected_model}")
+
+    cm = np.array(m["confusion_matrix"])
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.heatmap(cm, annot=True, cmap="Blues", fmt="d", ax=ax)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+    st.pyplot(fig)
+
 
 # ------------------------------------------------------------
-# Confusion Matrix
+# SECTION 4: Classification Report Table
 # ------------------------------------------------------------
-st.markdown("### 🔢 Confusion Matrix")
+st.markdown("## 📄 Classification Report")
 
-cm = np.array(m["confusion_matrix"])
+report_df = pd.DataFrame(m["classification_report"]).T
+report_df = report_df.round(3)
+report_df.index.name = "Class"
 
-fig, ax = plt.subplots(figsize=(4,3))
-sns.heatmap(cm, annot=True, cmap="Blues", fmt="d", ax=ax)
-ax.set_xlabel("Predicted")
-ax.set_ylabel("Actual")
-st.pyplot(fig)
+st.dataframe(report_df, width="stretch")
 
-# ------------------------------------------------------------
-# Classification Report
-# ------------------------------------------------------------
-st.markdown("### 📄 Classification Report")
-st.json(m["classification_report"])
 
 # ------------------------------------------------------------
-# Predictions Output
+# SECTION 5: Predictions
 # ------------------------------------------------------------
-st.markdown("### 🔮 Prediction Results")
-st.dataframe(results.head(50), use_container_width=True)
+st.markdown("## 🔮 Prediction Results")
+st.dataframe(results.head(50), width="stretch")
 
 st.download_button(
-    "📥 Download Predictions",
+    "📥 Download Predictions CSV",
     results.to_csv(index=False).encode("utf-8"),
     "predictions.csv",
     "text/csv"
