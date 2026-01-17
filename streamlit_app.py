@@ -12,6 +12,10 @@ import os
 # ------------------------------------------------------------
 st.set_page_config(page_title="Classification Model Comparison", layout="wide")
 
+# Ensure session_state page exists
+if "page" not in st.session_state:
+    st.session_state.page = 0   # 0 = Dataset Overview, 1 = Model Evaluation
+
 
 # ------------------------------------------------------------
 # Load Preprocessor
@@ -49,7 +53,6 @@ def clean_data(df):
     ]
     numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
 
-    # Normalize categorical
     for col in categorical_cols:
         df[col] = df[col].astype(str).str.strip().str.lower()
 
@@ -60,11 +63,12 @@ def clean_data(df):
     ]
 
     for col in yes_no_cols:
-        df[col] = df[col].replace({"y": "yes", "n": "no", "true": "yes", "false": "no"})
+        df[col] = df[col].replace({"y":"yes","n":"no","true":"yes","false":"no"})
 
-    df["InternetService"] = df["InternetService"].replace({"fiber": "fiber optic", "none": "no"})
+    df["InternetService"] = df["InternetService"].replace(
+        {"fiber":"fiber optic", "none":"no"}
+    )
 
-    # Numeric conversion
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
@@ -72,25 +76,60 @@ def clean_data(df):
 
 
 # ------------------------------------------------------------
-# Radio Navigation
+# Load Dataset BEFORE Sections (Global df)
 # ------------------------------------------------------------
-section = st.radio(
+required_cols = [
+    "gender","SeniorCitizen","Partner","Dependents","tenure","PhoneService",
+    "MultipleLines","InternetService","OnlineSecurity","OnlineBackup",
+    "DeviceProtection","TechSupport","StreamingTV","StreamingMovies",
+    "Contract","PaperlessBilling","PaymentMethod",
+    "MonthlyCharges","TotalCharges"
+]
+
+default_data_path = "model/test_default.csv"
+template_df = pd.DataFrame(columns=required_cols)
+
+uploaded = st.file_uploader("Upload CSV File", type=["csv"], key="global_upload")
+
+if uploaded:
+    df = pd.read_csv(uploaded)
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        st.error(f"Missing required columns: {missing}")
+        st.stop()
+    df = clean_data(df)
+else:
+    df = pd.read_csv(default_data_path)
+    df = clean_data(df)
+
+
+# ------------------------------------------------------------
+# Radio Navigation (Synced with session_state.page)
+# ------------------------------------------------------------
+radio_choice = st.radio(
     "Navigate",
-    ["Dataset Overview", "Model Evaluation"],
+    ["Dataset Overview and Selection", "Model Evaluation"],
+    index=st.session_state.page,
     horizontal=True
 )
 
+# Sync radio to session_state
+if radio_choice == "Dataset Overview and Selection":
+    st.session_state.page = 0
+else:
+    st.session_state.page = 1
+
 
 # ============================================================
-# SECTION 1 — DATASET OVERVIEW
+# SECTION 1 — DATASET OVERVIEW AND SELECTION
 # ============================================================
-if section == "Dataset Overview":
+if st.session_state.page == 0:
 
-    st.header("📁 Dataset Overview")
+    st.header("📁 Dataset Overview and Selection")
 
     st.write("""
-    This dataset contains customer subscription, service usage, and billing characteristics, 
-    used to predict the likelihood of customer churn in a telecom environment.
+    This dataset contains customer subscription and service usage attributes 
+    used for predicting telecom customer churn (binary classification).
     """)
 
     # Dataset Source + Credits
@@ -102,41 +141,38 @@ if section == "Dataset Overview":
     """)
 
     # ---------------------------
-    # Feature Overview Table
+    # Feature Overview
     # ---------------------------
     st.subheader("📌 Feature Overview")
 
     feature_info = pd.DataFrame([
         ["gender", "Customer gender", "Categorical"],
-        ["SeniorCitizen", "Whether customer is a senior", "Numeric (0/1)"],
-        ["Partner", "Has a partner", "Binary"],
-        ["Dependents", "Has dependents", "Binary"],
-        ["tenure", "Months with company", "Numeric"],
-        ["PhoneService", "Phone service subscription", "Binary"],
+        ["SeniorCitizen", "Whether customer is senior", "Numeric"],
+        ["Partner", "Customer has partner", "Binary"],
+        ["Dependents", "Customer dependents", "Binary"],
+        ["tenure", "Active months", "Numeric"],
+        ["PhoneService", "Phone plan", "Binary"],
         ["MultipleLines", "Multiple phone lines", "Categorical"],
         ["InternetService", "Internet technology", "Categorical"],
-        ["OnlineSecurity", "Security add‑on", "Binary"],
-        ["OnlineBackup", "Cloud backup", "Binary"],
-        ["DeviceProtection", "Device protection", "Binary"],
-        ["TechSupport", "Tech support service", "Binary"],
+        ["OnlineSecurity", "Security add-on", "Binary"],
+        ["OnlineBackup", "Backup service", "Binary"],
+        ["DeviceProtection", "Protection plan", "Binary"],
+        ["TechSupport", "Technical support", "Binary"],
         ["StreamingTV", "TV streaming", "Binary"],
         ["StreamingMovies", "Movie streaming", "Binary"],
-        ["Contract", "Contract type", "Categorical"],
-        ["PaperlessBilling", "Paperless billing enabled", "Binary"],
-        ["PaymentMethod", "Payment type", "Categorical"],
+        ["Contract", "Contract term", "Categorical"],
+        ["PaperlessBilling", "Paperless billing", "Binary"],
+        ["PaymentMethod", "Billing method", "Categorical"],
         ["MonthlyCharges", "Monthly fee", "Numeric"],
-        ["TotalCharges", "Total lifetime charges", "Numeric"]
+        ["TotalCharges", "Lifetime fee", "Numeric"]
     ], columns=["Feature", "Description", "Type"])
 
     st.dataframe(feature_info, width="stretch")
 
     # ---------------------------
-    # Dataset Upload + Template + Sample
+    # Template + Sample Downloads
     # ---------------------------
-    st.subheader("📥 Upload or Download Dataset")
-
-    required_cols = feature_info["Feature"].tolist()
-    template_df = pd.DataFrame(columns=required_cols)
+    st.subheader("📥 Download Template or Sample Dataset")
 
     colT, colS = st.columns(2)
 
@@ -147,31 +183,15 @@ if section == "Dataset Overview":
         "text/csv"
     )
 
-    default_data_path = "model/test_default.csv"
-    if os.path.exists(default_data_path):
-        default_df = pd.read_csv(default_data_path)
-        sample100 = default_df.sample(n=min(100, len(default_df)), random_state=42)
+    default_df = pd.read_csv(default_data_path)
+    sample100 = default_df.sample(n=min(100, len(default_df)), random_state=42)
 
-        colS.download_button(
-            "📥 Download Sample Test Data (100 rows)",
-            sample100.to_csv(index=False).encode("utf-8"),
-            "sample_test_100.csv",
-            "text/csv"
-        )
-
-    uploaded = st.file_uploader("Upload CSV File", type=["csv"])
-
-    if uploaded:
-        df = pd.read_csv(uploaded)
-        missing = [c for c in required_cols if c not in df.columns]
-        if missing:
-            st.error(f"Missing columns: {missing}")
-            st.stop()
-        df = clean_data(df)
-        st.success("Dataset uploaded successfully.")
-    else:
-        st.info("Using default evaluation dataset.")
-        df = clean_data(default_df)
+    colS.download_button(
+        "📥 Download Sample Test Data (100 rows)",
+        sample100.to_csv(index=False).encode("utf-8"),
+        "sample_test_100.csv",
+        "text/csv"
+    )
 
     # ---------------------------
     # Dataset Exploration
@@ -180,9 +200,9 @@ if section == "Dataset Overview":
 
     colA, colB, colC, colD = st.columns(4)
     colA.metric("Total Records", len(df))
-    colB.metric("Number of Features", df.shape[1])
-    colC.metric("Target Classes", 2)
-    colD.metric("Task Type", "Binary Classification")
+    colB.metric("Features", df.shape[1])
+    colC.metric("Classes", 2)
+    colD.metric("Type", "Binary Classification")
 
     # ---------------------------
     # Dataset Preview
@@ -190,25 +210,31 @@ if section == "Dataset Overview":
     st.subheader("🔍 Dataset Preview")
     st.dataframe(df.head(), width="stretch")
 
+    # NEXT BUTTON (move to section 2)
+    if st.button("Next →"):
+        st.session_state.page = 1
+        st.rerun()
+
 
 # ============================================================
 # SECTION 2 — MODEL EVALUATION
 # ============================================================
-else:
-    st.header("🤖 Model Evaluation Dashboard")
+if st.session_state.page == 1:
+
+    st.header("🤖 Model Evaluation")
 
     # --------------------------
-    # Implemented Models
+    # Implemented Models Section
     # --------------------------
-    st.subheader("Models Included in Comparison")
+    st.subheader("Models Included")
 
     model_info = pd.DataFrame([
-        ["Logistic Regression", "Linear Model", "Interpretable, robust baseline"],
-        ["Decision Tree", "Tree-Based", "Handles non-linear splits"],
-        ["KNN", "Instance-Based", "Distance-driven classification"],
-        ["Naive Bayes", "Probabilistic", "Efficient and assumption-based"],
-        ["Random Forest", "Ensemble (Bagging)", "Reduces variance, prevents overfitting"],
-        ["XGBoost", "Gradient Boosting", "High-performance boosting model"]
+        ["Logistic Regression", "Linear Model", "Interpretable baseline"],
+        ["Decision Tree", "Tree-Based", "Non-linear splits"],
+        ["KNN", "Instance-Based", "Distance-driven method"],
+        ["Naive Bayes", "Probabilistic", "Assumption-based"],
+        ["Random Forest", "Bagging Ensemble", "Reduces overfitting"],
+        ["XGBoost", "Boosting Ensemble", "High performance"]
     ], columns=["Model", "Category", "Characteristics"])
 
     st.dataframe(model_info, width="stretch")
@@ -216,25 +242,25 @@ else:
     # --------------------------
     # Metric Definitions
     # --------------------------
-    st.subheader("📈 Metric Guide")
+    st.subheader("📈 Metric Definitions")
 
     metric_def = pd.DataFrame([
-        ["Accuracy", "Correct prediction ratio", "Higher is better"],
-        ["AUC-ROC", "Class separability measure", "Higher is better"],
-        ["Precision", "Correctness of positive predictions", "Higher is better"],
-        ["Recall", "Coverage of actual positive cases", "Higher is better"],
-        ["F1 Score", "Balance of precision & recall", "Higher is better"],
-        ["MCC", "Balanced correlation measure", "+1 is ideal"]
-    ], columns=["Metric", "Meaning", "Preferred Direction"])
+        ["Accuracy", "Correct predictions ratio", "Higher = Better"],
+        ["AUC-ROC", "Class separability", "Higher = Better"],
+        ["Precision", "Correct positive predictions", "Higher = Better"],
+        ["Recall", "Detection of true positives", "Higher = Better"],
+        ["F1 Score", "Balance of precision & recall", "Higher = Better"],
+        ["MCC", "Correlation coefficient", "+1 = Ideal"]
+    ], columns=["Metric", "Meaning", "Preferred"])
 
     st.dataframe(metric_def, width="stretch")
 
     # --------------------------
-    # Model Selection
+    # Model Selection + Auto Evaluation
     # --------------------------
-    st.subheader("Model Results")
+    st.subheader("Model Performance Summary")
 
-    selected_model = st.selectbox("Choose Model", model_list)
+    selected_model = st.selectbox("Select Model", model_list)
     model = load_model(selected_model)
 
     X = preprocessor.transform(df)
@@ -258,12 +284,12 @@ else:
 
     cm = np.array(m["confusion_matrix"])
 
-    fig, ax = plt.subplots(figsize=(2.2, 1.8))  # small grid size
+    fig, ax = plt.subplots(figsize=(1.8, 1.4))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, cbar=False,
-                annot_kws={"size": 8})
-    ax.set_xlabel("Predicted", fontsize=8)
-    ax.set_ylabel("Actual", fontsize=8)
-    ax.tick_params(labelsize=7)
+                annot_kws={"size": 7})
+    ax.set_xlabel("Predicted", fontsize=7)
+    ax.set_ylabel("Actual", fontsize=7)
+    ax.tick_params(labelsize=6)
     st.pyplot(fig)
 
     # --------------------------
@@ -274,3 +300,8 @@ else:
     report_df = pd.DataFrame(m["classification_report"]).T.round(3)
     report_df.index.name = "Class"
     st.dataframe(report_df, width="stretch")
+
+    # PREVIOUS BUTTON (back to section 1)
+    if st.button("← Previous"):
+        st.session_state.page = 0
+        st.rerun()
