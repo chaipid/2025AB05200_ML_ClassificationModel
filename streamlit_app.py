@@ -35,9 +35,7 @@ preprocessor = load_preprocessor()
 # Load Models
 # ------------------------------------------------------------
 def load_model(name):
-    """Load saved model file."""
     return joblib.load(f"model/{name.lower().replace(' ', '_')}.pkl")
-
 
 model_list = [
     "Logistic Regression",
@@ -55,52 +53,49 @@ model_list = [
 def clean_data(df):
     df = df.copy()
 
-    categorical_cols = [
+    # Normalize categorical
+    cat_cols = [
         "gender","Partner","Dependents","PhoneService","MultipleLines",
         "InternetService","OnlineSecurity","OnlineBackup","DeviceProtection",
         "TechSupport","StreamingTV","StreamingMovies","Contract",
         "PaperlessBilling","PaymentMethod"
     ]
-    numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
-
-    # Normalize categorical
-    for col in categorical_cols:
+    for col in cat_cols:
         df[col] = df[col].astype(str).str.lower().str.strip()
 
-    yes_no_cols = [
+    # Normalize yes/no
+    yn_cols = [
         "Partner","Dependents","PhoneService","MultipleLines",
         "OnlineSecurity","OnlineBackup","DeviceProtection",
         "TechSupport","StreamingTV","StreamingMovies","PaperlessBilling"
     ]
+    for col in yn_cols:
+        df[col] = df[col].replace({"y": "yes", "n": "no", "true": "yes", "false": "no"})
 
-    for col in yes_no_cols:
-        df[col] = df[col].replace({
-            "y": "yes", "n": "no",
-            "true": "yes", "false": "no"
-        })
+    # InternetService fixes
+    df["InternetService"] = df["InternetService"].replace({"fiber": "fiber optic", "none": "no"})
 
-    df["InternetService"] = df["InternetService"].replace({
-        "fiber": "fiber optic",
-        "none": "no"
-    })
-
-    # Numeric conversion
+    # Fix numeric
+    numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # Normalize Churn if present
+    if "Churn" in df.columns:
+        df["Churn"] = df["Churn"].astype(str).str.lower().str.strip()
 
     return df
 
 
 # ------------------------------------------------------------
-# GLOBAL DATA LOADING (before navigation)
+# Load Dataset BEFORE Sections (Global df)
 # ------------------------------------------------------------
-
 required_cols = [
     "gender","SeniorCitizen","Partner","Dependents","tenure","PhoneService",
     "MultipleLines","InternetService","OnlineSecurity","OnlineBackup",
     "DeviceProtection","TechSupport","StreamingTV","StreamingMovies",
     "Contract","PaperlessBilling","PaymentMethod",
-    "MonthlyCharges","TotalCharges", "Churn"
+    "MonthlyCharges","TotalCharges","Churn"
 ]
 
 default_data_path = "model/test_default.csv"
@@ -121,7 +116,7 @@ else:
 
 
 # ------------------------------------------------------------
-# RADIO NAVIGATION (sync with session_state)
+# RADIO NAVIGATION
 # ------------------------------------------------------------
 radio_choice = st.radio(
     "Navigate",
@@ -144,11 +139,12 @@ if st.session_state.page == 0:
     st.header("📁 Dataset Overview and Selection")
 
     st.write("""
-    This dataset covers telecom customer attributes used for predicting 
-    churn behavior in a binary classification setting.
+    This dataset represents telecom customer details used to predict churn (whether 
+    the customer has left the company). The Churn column must be present to evaluate 
+    model performance.
     """)
 
-    # Dataset Source + Credits
+    # Dataset Description and Credits
     st.subheader("Dataset Description")
     st.write("""
     - **Source:** IBM Sample Data Repository  
@@ -156,52 +152,46 @@ if st.session_state.page == 0:
     - **Credits:** IBM Corporation – Telco Customer Churn Dataset  
     """)
 
-    # ---------------------------
     # Feature Overview Table
-    # ---------------------------
     st.subheader("📌 Feature Overview")
 
     feature_info = pd.DataFrame([
         ["gender", "Customer gender", "Categorical"],
-        ["SeniorCitizen", "Customer is senior citizen", "Numeric"],
+        ["SeniorCitizen", "Is senior citizen", "Numeric"],
         ["Partner", "Has partner", "Binary"],
         ["Dependents", "Has dependents", "Binary"],
         ["tenure", "Months active", "Numeric"],
         ["PhoneService", "Phone plan", "Binary"],
-        ["MultipleLines", "Multiple phone lines", "Categorical"],
+        ["MultipleLines", "Multiple lines", "Categorical"],
         ["InternetService", "Internet plan", "Categorical"],
         ["OnlineSecurity", "Security addon", "Binary"],
         ["OnlineBackup", "Backup addon", "Binary"],
-        ["DeviceProtection", "Protection service", "Binary"],
-        ["TechSupport", "Technical support", "Binary"],
+        ["DeviceProtection", "Protection addon", "Binary"],
+        ["TechSupport", "Tech support", "Binary"],
         ["StreamingTV", "TV streaming", "Binary"],
-        ["StreamingMovies", "Movie streaming", "Binary"],
+        ["StreamingMovies", "Movies streaming", "Binary"],
         ["Contract", "Contract type", "Categorical"],
         ["PaperlessBilling", "Paperless billing", "Binary"],
         ["PaymentMethod", "Payment type", "Categorical"],
         ["MonthlyCharges", "Monthly fee", "Numeric"],
         ["TotalCharges", "Lifetime fee", "Numeric"],
-        ["Churn", "Target variable", "Binary"]
+        ["Churn", "Target variable", "Binary (yes/no)"]
     ], columns=["Feature", "Description", "Type"])
 
     st.dataframe(feature_info, width="stretch")
 
-    # ---------------------------
     # Template + Sample Data
-    # ---------------------------
     st.subheader("📥 Download Template or Sample Dataset")
 
     colT, colS = st.columns(2)
 
-    # Template
     colT.download_button(
-        "📄 Download Input Template",
+        "📄 Download Input Template (with Churn)",
         template_df.to_csv(index=False).encode("utf-8"),
         "template_dataset.csv",
         "text/csv"
     )
 
-    # Sample 100 rows
     default_df = pd.read_csv(default_data_path)
     sample100 = default_df.sample(n=min(100, len(default_df)), random_state=42)
 
@@ -212,86 +202,62 @@ if st.session_state.page == 0:
         "text/csv"
     )
 
-    # ---------------------------
     # Dataset Exploration
-    # ---------------------------
     st.subheader("📊 Dataset Exploration")
 
     colA, colB, colC, colD = st.columns(4)
     colA.metric("Total Records", len(df))
     colB.metric("Features", df.shape[1])
-    colC.metric("Classes", 2)
+    colC.metric("Target Present?", "Yes" if "Churn" in df.columns else "No")
     colD.metric("Type", "Binary Classification")
 
-    # ---------------------------
-    # Dataset Preview
-    # ---------------------------
     st.subheader("🔍 Dataset Preview")
     st.dataframe(df.head(), width="stretch")
 
-    # NEXT BUTTON
     if st.button("Next →"):
         st.session_state.page = 1
         st.rerun()
 
 
 # ============================================================
-# SECTION 2 — MODEL EVALUATION (DYNAMIC METRICS)
+# SECTION 2 — MODEL EVALUATION (DYNAMIC)
 # ============================================================
 if st.session_state.page == 1:
 
     st.header("🤖 Model Evaluation")
 
-    # --------------------------
-    # Implemented Models Table
-    # --------------------------
-    st.subheader("Models Included")
+    if "Churn" not in df.columns:
+        st.error("❌ Dataset does not contain 'Churn'. Cannot compute evaluation metrics.")
+        st.stop()
 
-    model_info = pd.DataFrame([
-        ["Logistic Regression", "Linear Model", "Interpretable baseline"],
-        ["Decision Tree", "Tree-Based", "Handles non-linear splits"],
-        ["KNN", "Instance-Based", "Distance-driven algorithm"],
-        ["Naive Bayes", "Probabilistic", "Efficient for high-dimensional data"],
-        ["Random Forest", "Bagging Ensemble", "Reduces variance"],
-        ["XGBoost", "Boosting Ensemble", "High performance"]
-    ], columns=["Model", "Category", "Characteristics"])
-
-    st.dataframe(model_info, width="stretch")
-
-    # --------------------------
-    # Metric Definitions Table
-    # --------------------------
+    # Metrics Info
     st.subheader("📈 Metric Definitions")
 
-    metric_def = pd.DataFrame([
-        ["Accuracy", "Overall correctness", "Higher = Better"],
-        ["AUC-ROC", "Class separation ability", "Higher = Better"],
-        ["Precision", "Correctness of predicted positives", "Higher = Better"],
-        ["Recall", "Coverage of actual positives", "Higher = Better"],
-        ["F1 Score", "Balance of precision & recall", "Higher = Better"],
-        ["MCC", "Balanced correlation", "+1 = Ideal"]
-    ], columns=["Metric", "Meaning", "Preferred"])
+    metric_table = pd.DataFrame([
+        ["Accuracy", "Correct predictions"],
+        ["AUC‑ROC", "Discrimination power"],
+        ["Precision", "Correctness of predicted positives"],
+        ["Recall", "Correctly detected positives"],
+        ["F1 Score", "Balance of Precision and Recall"],
+        ["MCC", "Balanced accuracy-like measure"]
+    ], columns=["Metric", "Meaning"])
 
-    st.dataframe(metric_def, width="stretch")
+    st.dataframe(metric_table, width="stretch")
 
-    # --------------------------
-    # MODEL SELECTION + DYNAMIC EVALUATION
-    # --------------------------
+    # Model Selection
     st.subheader("Model Performance Summary")
 
     selected_model = st.selectbox("Select Model", model_list)
     model = load_model(selected_model)
 
-    # Prepare X, y
+    X = preprocessor.transform(df.drop(columns=["Churn"]))
     y_true = df["Churn"].replace({"yes": 1, "no": 0}).astype(int)
-    X = preprocessor.transform(df)
 
-    # Predictions
     y_pred = model.predict(X)
     y_prob = model.predict_proba(X)[:, 1]
 
     # Dynamic Metrics
-    dynamic_metrics = {
+    dyn = {
         "accuracy": accuracy_score(y_true, y_pred),
         "auc": roc_auc_score(y_true, y_prob),
         "precision": precision_score(y_true, y_pred),
@@ -306,43 +272,28 @@ if st.session_state.page == 1:
     result_table = pd.DataFrame({
         "Metric": ["Accuracy","AUC","Precision","Recall","F1 Score","MCC"],
         "Value": [
-            dynamic_metrics["accuracy"],
-            dynamic_metrics["auc"],
-            dynamic_metrics["precision"],
-            dynamic_metrics["recall"],
-            dynamic_metrics["f1"],
-            dynamic_metrics["mcc"]
+            dyn["accuracy"], dyn["auc"], dyn["precision"],
+            dyn["recall"], dyn["f1"], dyn["mcc"]
         ]
     }).round(4)
 
     st.dataframe(result_table, width="stretch")
 
-    # --------------------------
     # Confusion Matrix
-    # --------------------------
     st.subheader(f"{selected_model} – Confusion Matrix")
 
-    cm = dynamic_metrics["cm"]
-
-    fig, ax = plt.subplots(figsize=(1.8, 1.4))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, cbar=False,
-                annot_kws={"size": 7})
+    fig, ax = plt.subplots(figsize=(1.8, 1.3))
+    sns.heatmap(dyn["cm"], annot=True, fmt="d", cmap="Blues", ax=ax,
+                cbar=False, annot_kws={"size": 7})
     ax.set_xlabel("Predicted", fontsize=7)
     ax.set_ylabel("Actual", fontsize=7)
     ax.tick_params(labelsize=6)
     st.pyplot(fig)
 
-    # --------------------------
     # Classification Report
-    # --------------------------
     st.subheader("Classification Report")
+    st.dataframe(pd.DataFrame(dyn["report"]).T.round(3), width="stretch")
 
-    report_df = pd.DataFrame(dynamic_metrics["report"]).T.round(3)
-    report_df.index.name = "Class"
-
-    st.dataframe(report_df, width="stretch")
-
-    # PREVIOUS BUTTON
     if st.button("← Previous"):
         st.session_state.page = 0
         st.rerun()
