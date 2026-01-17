@@ -1,26 +1,60 @@
 import streamlit as st
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+import numpy as np
 import joblib
 import json
 import os
-
-st.set_page_config(page_title="Telco Churn Prediction", layout="wide")
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
 
 # ------------------------------------------------------------
-# Load saved metrics
+# Streamlit Page Settings
+# ------------------------------------------------------------
+st.set_page_config(page_title="ML Model Comparison", layout="wide")
+
+# ------------------------------------------------------------
+# Load Preprocessor
+# ------------------------------------------------------------
+@st.cache_resource
+def load_preprocessor():
+    try:
+        return joblib.load("model/preprocessor.pkl")
+    except:
+        st.error("❌ preprocessor.pkl not found.")
+        return None
+
+preprocessor = load_preprocessor()
+
+# ------------------------------------------------------------
+# Load Saved ML Models
+# ------------------------------------------------------------
+def load_model(name):
+    path = f"model/{name.lower().replace(' ', '_')}.pkl"
+    if os.path.exists(path):
+        return joblib.load(path)
+    else:
+        st.error(f"Model file not found: {path}")
+        return None
+
+# ------------------------------------------------------------
+# Load Metrics
 # ------------------------------------------------------------
 with open("model/metrics.json", "r") as f:
     metrics = json.load(f)
 
-def load_model(name):
-    path = f"model/{name.lower().replace(' ', '_')}.pkl"
-    return joblib.load(path)
+model_list = list(metrics.keys())
 
 # ------------------------------------------------------------
-# Required columns
+# Dataset Choices
 # ------------------------------------------------------------
+st.title("📊 Machine Learning Classification – Model Comparison Dashboard")
+
+dataset_choice = st.selectbox(
+    "Select Dataset Source:",
+    ["Telco Churn Dataset (Default)", "Upload Custom Dataset"]
+)
+
 required_cols = [
     "gender","SeniorCitizen","Partner","Dependents","tenure","PhoneService",
     "MultipleLines","InternetService","OnlineSecurity","OnlineBackup",
@@ -29,25 +63,23 @@ required_cols = [
     "MonthlyCharges","TotalCharges"
 ]
 
-categorical_cols = [
-    "gender","Partner","Dependents","PhoneService","MultipleLines",
-    "InternetService","OnlineSecurity","OnlineBackup","DeviceProtection",
-    "TechSupport","StreamingTV","StreamingMovies","Contract",
-    "PaperlessBilling","PaymentMethod"
-]
-
-numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
-
 # ------------------------------------------------------------
-# Auto-clean categorical & numeric values
+# Data Cleaning (Matches your training notebook)
 # ------------------------------------------------------------
-def clean_uploaded_data(df):
+def clean_data(df):
+    df = df.copy()
 
-    # Strip whitespace + lowercase
+    categorical_cols = [
+        "gender","Partner","Dependents","PhoneService","MultipleLines",
+        "InternetService","OnlineSecurity","OnlineBackup","DeviceProtection",
+        "TechSupport","StreamingTV","StreamingMovies","Contract",
+        "PaperlessBilling","PaymentMethod"
+    ]
+    numeric_cols = ["SeniorCitizen","tenure","MonthlyCharges","TotalCharges"]
+
     for col in categorical_cols:
         df[col] = df[col].astype(str).str.strip().str.lower()
 
-    # Normalize yes/no style columns
     yes_no_cols = [
         "Partner","Dependents","PhoneService","MultipleLines","OnlineSecurity",
         "OnlineBackup","DeviceProtection","TechSupport","StreamingTV",
@@ -60,7 +92,6 @@ def clean_uploaded_data(df):
             "true": "yes", "false": "no"
         })
 
-    # Normalize InternetService
     df["InternetService"] = df["InternetService"].replace({
         "fiber optic": "fiber optic",
         "fiber": "fiber optic",
@@ -68,92 +99,70 @@ def clean_uploaded_data(df):
         "none": "no"
     })
 
-    # Convert numerics safely
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
 # ------------------------------------------------------------
-# Load default test dataset
+# Load Dataset
 # ------------------------------------------------------------
-default_path = "model/test_default.csv"
-default_df = pd.read_csv(default_path) if os.path.exists(default_path) else pd.DataFrame({col:[] for col in required_cols})
-default_df = clean_uploaded_data(default_df)
+if dataset_choice == "Telco Churn Dataset (Default)":
+    df = pd.read_csv("model/test_default.csv")
+    st.info("Loaded default Telco test dataset.")
+    df = clean_data(df)
 
-# ------------------------------------------------------------
-# PAGE HEADER
-# ------------------------------------------------------------
-st.markdown("## 📊 Telco Customer Churn Prediction Dashboard")
-st.markdown("---")
+else:
+    uploaded = st.file_uploader("Upload custom CSV file", type=["csv"])
+    if uploaded:
+        df = pd.read_csv(uploaded)
 
-st.write(
-    "This dashboard allows you to upload a test dataset, select a model, "
-    "view performance metrics, and generate churn predictions. "
-)
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            st.error(f"❌ Missing required columns: {missing}")
+            st.stop()
 
-st.info(f"Showing predictions for default test dataset ({len(default_df)} rows). "
-        "Upload your own CSV to update the results.")
-
-# ------------------------------------------------------------
-# SAMPLE CSV + EXPECTED FORMAT
-# ------------------------------------------------------------
-st.markdown("### 📥 Download Sample CSV (Optional)")
-sample_df = pd.DataFrame({col: ["sample_value"] for col in required_cols})
-st.download_button(
-    "Download Sample CSV Template",
-    sample_df.to_csv(index=False).encode("utf-8"),
-    "sample_telco_test.csv",
-    "text/csv"
-)
-
-st.markdown("### 📘 Expected CSV Format:")
-st.write(required_cols)
-st.warning("Only CSV files with the above columns will be accepted.")
-
-st.markdown("---")
-
-# ------------------------------------------------------------
-# FILE UPLOAD
-# ------------------------------------------------------------
-uploaded_file = st.file_uploader("Upload Test CSV", type=["csv"])
-
-if uploaded_file:
-    data = pd.read_csv(uploaded_file)
-
-    missing = [c for c in required_cols if c not in data.columns]
-    if missing:
-        st.error(f"Uploaded CSV is missing required columns: {missing}")
+        df = clean_data(df)
+        st.success("Custom dataset loaded and cleaned.")
+    else:
+        st.warning("Upload a CSV to proceed.")
         st.stop()
 
-    st.success("Custom CSV uploaded. Predictions will now use this dataset.")
-    data = clean_uploaded_data(data)
-else:
-    data = default_df.copy()
+st.subheader("📌 Dataset Preview")
+st.dataframe(df.head(), use_container_width=True)
 
-st.markdown("### 🔍 Preview of Dataset")
-st.dataframe(data.head())
-
+# ------------------------------------------------------------
+# Model Selection
+# ------------------------------------------------------------
 st.markdown("---")
+st.subheader("🤖 Select a Model")
+
+selected_model = st.selectbox("Choose model:", model_list)
+model = load_model(selected_model)
+
+if preprocessor is None or model is None:
+    st.stop()
 
 # ------------------------------------------------------------
-# MODEL SELECTION
+# Preprocess & Predict
 # ------------------------------------------------------------
-st.markdown("## 🤖 Model Selection & Performance Metrics")
+X = preprocessor.transform(df)
+pred = model.predict(X)
+prob = model.predict_proba(X)[:, 1]
 
-model_list = list(metrics.keys())
-
-# Default selected model should be Logistic Regression
-default_index = model_list.index("Logistic Regression") if "Logistic Regression" in model_list else 0
-
-model_name = st.selectbox("Choose a model:", model_list, index=default_index)
-model = load_model(model_name)
-m = metrics[model_name]
+results = df.copy()
+results["Prediction"] = pred
+results["Probability"] = prob.round(4)
 
 # ------------------------------------------------------------
-# METRICS DISPLAY
+# Show Metrics
 # ------------------------------------------------------------
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+m = metrics[selected_model]
+
+st.markdown("### 📈 Performance Metrics")
+col1, col2, col3 = st.columns(3)
+col4, col5, col6 = st.columns(3)
+
 col1.metric("Accuracy", round(m["accuracy"],4))
 col2.metric("AUC", round(m["auc"],4))
 col3.metric("Precision", round(m["precision"],4))
@@ -161,43 +170,34 @@ col4.metric("Recall", round(m["recall"],4))
 col5.metric("F1 Score", round(m["f1"],4))
 col6.metric("MCC", round(m["mcc"],4))
 
-st.markdown("---")
-
 # ------------------------------------------------------------
-# CONFUSION MATRIX
+# Confusion Matrix
 # ------------------------------------------------------------
-st.markdown("### 📊 Confusion Matrix")
-cm = m["confusion_matrix"]
+st.markdown("### 🔢 Confusion Matrix")
 
-fig, ax = plt.subplots()
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax)
+cm = np.array(m["confusion_matrix"])
+
+fig, ax = plt.subplots(figsize=(4,3))
+sns.heatmap(cm, annot=True, cmap="Blues", fmt="d", ax=ax)
 ax.set_xlabel("Predicted")
 ax.set_ylabel("Actual")
 st.pyplot(fig)
 
-st.markdown("---")
-
 # ------------------------------------------------------------
-# CLASSIFICATION REPORT
+# Classification Report
 # ------------------------------------------------------------
 st.markdown("### 📄 Classification Report")
 st.json(m["classification_report"])
 
-st.markdown("---")
-
 # ------------------------------------------------------------
-# AUTOMATIC PREDICTION
+# Predictions Output
 # ------------------------------------------------------------
-st.markdown("## 🔮 Prediction Results (Auto‑generated)")
-
-pred_df = data.copy()
-pred_df["Churn_Prediction"] = model.predict(pred_df)
-
-st.dataframe(pred_df)
+st.markdown("### 🔮 Prediction Results")
+st.dataframe(results.head(50), use_container_width=True)
 
 st.download_button(
-    "📥 Download Predictions CSV",
-    pred_df.to_csv(index=False).encode("utf-8"),
+    "📥 Download Predictions",
+    results.to_csv(index=False).encode("utf-8"),
     "predictions.csv",
     "text/csv"
 )
